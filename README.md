@@ -2,7 +2,9 @@
 
 ##
 
-##
+## Libraries
+
+1. [PyQt5](https://www.riverbankcomputing.com/software/pyqt/intro)
 
 ## Others
 
