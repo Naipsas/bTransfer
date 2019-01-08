@@ -5,6 +5,8 @@
 # bTransfer
 # Started on Jan 2019
 
+import os
+
 import socket
 import threading
 
@@ -24,21 +26,85 @@ if __name__ == '__main__':
 # https://stackoverflow.com/questions/12083034/pyqt-updating-gui-from-a-callback
 class Recv_File_Task(QtCore.QThread):
 
-    progress = QtCore.pyqtSignal(int)
+    progress = QtCore.pyqtSignal(float)
+    size = 0
+
+    port = 0
+
+    def setPort(self, port):
+        self.port = port
 
     def run(self):
-        # do some functionality
-        for i in range(10000):
-            self.updated.emit(str(i))
+
+        self.s = socket.socket()
+        self.host = socket.gethostname()
+        self.s.bind((self.host, int(self.port)))
+        self.s.listen(1)
+
+        stage = 0
+        acc = 0
+
+        while True:
+            c, addr = self.s.accept()
+            #print 'Got connection from', addr
+            #print "Receiving..."
+            l = c.recv(1024)
+            while (l):
+                #print "Receiving..."
+                if stage == 0:
+                    f = open("/home/btc/Escritorio/" + str(l), 'wb')
+                    stage += 1
+                elif stage == 1:
+                    self.size = int(l)
+                else:
+                    f.write(l)
+                l = c.recv(1024)
+                acc += len(l)
+                self.progress.emit(float(acc) / self.size)
+            f.close()
+            #print "Done Receiving"
+            #c.send('Thank you for connecting')
+            c.close()
 
 class Send_File_Task(QtCore.QThread):
 
-    progress = QtCore.pyqtSignal(int)
+    progress = QtCore.pyqtSignal(float)
+    size = 0
+
+    port = 0
+    ip = ""
+    file = ""
+
+    def setTarget(self, ip, port):
+        self.ip = ip
+        self.port = int(port)
+
+    def setFile(self, file):
+        self.file = file
+        self.size = os.path.getsize(file)
 
     def run(self):
-        # do some functionality
-        for i in range(10000):
-            self.updated.emit(str(i))
+
+        self.s = socket.socket()
+        #host = socket.gethostname()
+
+        self.s.connect((self.ip, self.port))
+        self.s.send("Name " + file)
+        f = open(self.file,'rb')
+        #print 'Sending...'
+        l = f.read(1024)
+        acc = 0
+        while (l):
+            #print 'Sending...'
+            self.s.send(l)
+            acc += len(l)
+            self.progress.emit(float(acc) / self.size)
+            l = f.read(1024)
+        f.close()
+        #print "Done Sending"
+        self.s.shutdown(socket.SHUT_WR)
+        #print s.recv(1024)
+        self.s.close()
 
 class bGUI:
 
@@ -70,14 +136,14 @@ class bGUI:
 
         # First row
         leftside.addWidget(QLabel("IP destino: "), 1, 0)
-        ip_lineedit = QLineEdit()
-        ip_lineedit.setPlaceholderText("Ejemplo: 8.8.8.8")
-        leftside.addWidget(ip_lineedit, 1, 1)
+        self.ip_lineedit = QLineEdit()
+        self.ip_lineedit.setPlaceholderText("Ejemplo: 8.8.8.8")
+        self.ip_lineedit.textChanged.connect(lambda text, le=self.ip_lineedit: self.__ipChanged(le, text))
+        leftside.addWidget(self.ip_lineedit, 1, 1)
         # Second row
         leftside.addWidget(QLabel("Puerto (TCP): "), 2, 0)
         self.sd_port_lineedit = QLineEdit()
         self.sd_port_lineedit.setPlaceholderText("Ejemplo: 20288")
-        #self.sd_port_lineedit.textChanged.connect(self.__portChanged)
         self.sd_port_lineedit.textChanged.connect(lambda text, le=self.sd_port_lineedit: self.__portChanged(le, text))
         leftside.addWidget(self.sd_port_lineedit, 2, 1)
         # Third row
@@ -93,7 +159,8 @@ class bGUI:
         sd_speed_label = QLabel("No enviando")
         #sd_speed_label.setAlignment(Qt.AlignCenter)
         leftside.addWidget(sd_speed_label, 5, 1)
-        leftside.addWidget(QProgressBar(), 6, 0, 1, 2)
+        self.send_progressbar = QProgressBar()
+        leftside.addWidget(self.send_progressbar, 6, 0, 1, 2)
 
         # Compose it all and add to the main grid
         # https://www.pythoncentral.io/pyside-pyqt-tutorial-the-qlistwidget/
@@ -120,18 +187,28 @@ class bGUI:
         rc_speed_label = QLabel("No enviando")
         #rc_speed_label.setAlignment(Qt.AlignCenter)
         rightside.addWidget(rc_speed_label, 5, 1)
-        rightside.addWidget(QProgressBar(), 6, 0, 1, 2)
+        self.recv_progressbar = QProgressBar()
+        rightside.addWidget(self.recv_progressbar, 6, 0, 1, 2)
 
         #layout.addWidget(QListWidget(), 2, 1)
         layout.addLayout(rightside, 2, 1)
 
         # Third row
-        send_button = QPushButton('Enviar')
-        layout.addWidget(send_button, 3, 0, 1, 1, Qt.AlignCenter)
+        self.send_button = QPushButton('Enviar')
+        self.send_button.clicked.connect(self.__sendFile)
+        layout.addWidget(self.send_button, 3, 0, 1, 1, Qt.AlignCenter)
+
         self.enable_button = QPushButton('Activar')
         self.enable_button.clicked.connect(self.__toggleReceiver)
         layout.addWidget(self.enable_button, 3, 1, 1, 1, Qt.AlignCenter)
 
+        # Server - receive file
+        self._threadRc = Recv_File_Task()
+        self._threadRc.progress.connect(lambda progress, le=self.recv_progressbar: self.__updateProgressBar(le, progress))
+
+        # Client - send file
+        self._threadSd = Send_File_Task()
+        self._threadSd.progress.connect(lambda progress, le=self.send_progressbar: self.__updateProgressBar(le, progress))
 
         window.setMinimumWidth(650)
         window.setWindowTitle('bTransfer')
@@ -160,58 +237,54 @@ class bGUI:
             #page.close()
             print(e)
 
+    def __ipChanged(self, widget, text):
+        # Here we have no checks yet
+        self.ip = text
+
     def __portChanged(self, widget, text):
         try:
             if int(text) > 65356:
-                widget.setText("65535")
+                final = "65535"
             elif int(text) <= 0:
-                widget.setText("20000")
+                final = "20000"
+            else:
+                final = text
 
-            self.port = text
+            widget.setText(final)
+            self.port = final
 
         except Exception as e:
-            widget.setText("20000")
+            widget.setText("0")
 
     def __toggleReceiver(self):
 
-        if self.receiver == False:
+        print("puerto:" + self.port)
+
+        if (self.receiver == False) and (self.port != ""):
             self.enable_button.setText("Desactivar")
 
             # Enable TCP server
-            self.s = socket.socket()
-            self.host = socket.gethostname()
-            self.s.bind((self.host, int(self.port)))
-            self.s.listen(1)
+            self._threadRc.setPort(self.port)
+            self._threadRc.start()
+
+            self.receiver = True
 
         else:
             self.enable_button.setText("Activar")
 
             # Disable TCP server
-            self.s.close()
+            self._threadRc.exit()
 
-        self.receiver = not self.receiver
+            self.receiver = False
 
-    def __waitForFile(self):
+    def __updateProgressBar(self, bar, amount):
+        bar.setValue(amount)
 
-        stage = 0
+    def __sendFile(self):
 
-        while True:
-            c, addr = self.s.accept()
-            #print 'Got connection from', addr
-            #print "Receiving..."
-            l = c.recv(1024)
-            while (l):
-                #print "Receiving..."
-                if stage == 0:
-                    f = open("/home/btc/Escritorio/" + str(l), 'wb')
-                    stage += 1
-                else:
-                    f.write(l)
-                l = c.recv(1024)
-            f.close()
-            #print "Done Receiving"
-            #c.send('Thank you for connecting')
-            c.close()
+        self._threadSd.setTarget(self.ip, self.port)
+        self._threadSd.setFile(self.filename[0])
+        self._threadSd.start()
 
     def __selectFile(self):
 
