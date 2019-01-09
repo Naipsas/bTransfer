@@ -9,6 +9,7 @@ import os
 import time
 
 import socket
+import struct
 import threading
 
 import urllib.error
@@ -54,6 +55,23 @@ class Recv_File_Task(QtCore.QThread):
         speed = str(result) + prefix + units
         self.speed.emit(speed)
 
+    def __recvData(self):
+        lengthbuf = self.__recvall(4)
+        if lengthbuf is not None:
+            length, = struct.unpack('!I', lengthbuf)
+            return self.__recvall(length)
+        else:
+            return False
+
+    def __recvall(self, count):
+        buf = b''
+        while count:
+            newbuf = self.c.recv(count)
+            if not newbuf: return None
+            buf += newbuf
+            count -= len(newbuf)
+        return buf
+
     def __recvHeader(self, data):
         line = data.decode("utf-8").split(":")
         if line[0] == "Name":
@@ -74,8 +92,9 @@ class Recv_File_Task(QtCore.QThread):
         acc = 0
 
         while True:
-            c, addr = self.s.accept()
-            l = c.recv(1024)
+            self.c, addr = self.s.accept()
+            #l = c.recv(1024)
+            l = self.__recvData()
             while (l):
                 start_time = time.time()
                 if stage < 2:
@@ -85,12 +104,13 @@ class Recv_File_Task(QtCore.QThread):
                     self.f.write(l)
                     acc += len(l)
                     self.__setProgress(acc)
-                l = c.recv(1024)
+                #l = c.recv(1024)
                 elapsed_time = time.time() - start_time
                 self.__setSpeed(len(l), elapsed_time)
+                l = self.__recvData()
 
             self.f.close()
-            c.close()
+            self.c.close()
             stage = 0
             acc = 0
 
@@ -117,7 +137,13 @@ class Send_File_Task(QtCore.QThread):
         self.size = os.path.getsize(file)
 
     def __sendHeader(self, name, value):
-        self.s.send((name + ":" + value).encode('utf-8'))
+        message = (name + ":" + value).encode('utf-8')
+        self.__sendData(message)
+
+    def __sendData(self, data):
+        length = len(data)
+        self.s.sendall(struct.pack('!I', length))
+        self.s.sendall(data)
 
     def __setProgress(self, amount):
         self.progress.emit(float(amount) / self.size)
@@ -150,7 +176,8 @@ class Send_File_Task(QtCore.QThread):
         acc = 0
         while (l):
             start_time = time.time()
-            self.s.send(l)
+            #self.s.send(l)
+            self.__sendData(l)
             acc += len(l)
             self.__setProgress(acc)
             l = f.read(1024)
