@@ -6,6 +6,7 @@
 # Started on Jan 2019
 
 import os
+import time
 
 import socket
 import threading
@@ -27,17 +28,45 @@ if __name__ == '__main__':
 class Recv_File_Task(QtCore.QThread):
 
     progress = QtCore.pyqtSignal(float)
+    speed = QtCore.pyqtSignal(str)
     size = 0
 
     port = 0
 
+    filename = ""
+
     def setPort(self, port):
         self.port = port
+
+    def __setProgress(self, amount):
+        self.progress.emit(float(amount) / self.size)
+
+    def __setSpeed(self, data, time):
+        result = data / time
+        units = "Bps"
+        prefix = ""
+        if result > 1000:
+            result /= 1024
+            prefix = "K"
+        if result > 1000:
+            result /= 1024
+            prefix = "M"
+        speed = str(result) + prefix + units
+        self.speed.emit(speed)
+
+    def __recvHeader(self, data):
+        line = data.decode("utf-8").split(":")
+        if line[0] == "Name":
+            self.filename = line[1]
+            self.f = open("/home/btc/Escritorio/" + self.filename, 'wb')
+        elif line[0] == "Size":
+            self.size = int(line[1])
+        else:
+            print("ERROR: " + "".join(line))
 
     def run(self):
 
         self.s = socket.socket()
-        #self.host = socket.gethostname()
         self.s.bind(('', int(self.port)))
         self.s.listen(1)
 
@@ -48,31 +77,36 @@ class Recv_File_Task(QtCore.QThread):
             c, addr = self.s.accept()
             l = c.recv(1024)
             while (l):
-                if stage == 0:
-                    filename = l.decode("utf-8").split(":")
-                    f = open("/home/btc/Escritorio/" + filename[1], 'wb')
-                    stage += 1
-                elif stage == 1:
-                    chain = l.decode("utf-8").split(":")
-                    self.size = int(chain[-1])
+                start_time = time.time()
+                if stage < 2:
+                    self.__recvHeader(l)
                     stage += 1
                 else:
-                    f.write(l)
+                    self.f.write(l)
                     acc += len(l)
-                    self.progress.emit(float(acc) / self.size)
+                    self.__setProgress(acc)
                 l = c.recv(1024)
+                elapsed_time = time.time() - start_time
+                self.__setSpeed(len(l), elapsed_time)
 
-            f.close()
+            self.f.close()
             c.close()
+            stage = 0
+            acc = 0
 
 class Send_File_Task(QtCore.QThread):
 
     progress = QtCore.pyqtSignal(float)
+    speed = QtCore.pyqtSignal(str)
     size = 0
 
     port = 0
     ip = ""
     file = ""
+
+    def __init__(self):
+        super(Send_File_Task, self).__init__()
+        self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     def setTarget(self, ip, port):
         self.ip = ip
@@ -82,21 +116,46 @@ class Send_File_Task(QtCore.QThread):
         self.file = file
         self.size = os.path.getsize(file)
 
+    def __sendHeader(self, name, value):
+        self.s.send((name + ":" + value).encode('utf-8'))
+
+    def __setProgress(self, amount):
+        self.progress.emit(float(amount) / self.size)
+
+    def __setSpeed(self, data, time):
+        result = data / time
+        units = "Bps"
+        prefix = ""
+        if result > 1000:
+            result /= 1024
+            prefix = "K"
+        if result > 1000:
+            result /= 1024
+            prefix = "M"
+        speed = str(result) + prefix + units
+        self.speed.emit(speed)
+
     def run(self):
 
-        self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         #host = socket.gethostname()
-        self.s.connect((self.ip, self.port))
-        self.s.send(("Name:" + self.file.split("/")[-1]).encode('utf-8'))
-        self.s.send(("Size:" + str(self.size)).encode('utf-8'))
+        try:
+            self.s.connect((self.ip, self.port))
+        except Exception as e:
+            self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+        self.__sendHeader("Name", self.file.split("/")[-1])
+        self.__sendHeader("Size", str(self.size))
         f = open(self.file,'rb')
         l = f.read(1024)
         acc = 0
         while (l):
+            start_time = time.time()
             self.s.send(l)
             acc += len(l)
-            self.progress.emit(float(acc) / self.size)
+            self.__setProgress(acc)
             l = f.read(1024)
+            elapsed_time = time.time() - start_time
+            self.__setSpeed(len(l), elapsed_time)
         f.close()
         self.s.shutdown(socket.SHUT_WR)
         self.s.close()
@@ -151,9 +210,9 @@ class bGUI:
         leftside.addWidget(self.file_label, 4, 0, 1, 2)
         # Third row
         leftside.addWidget(QLabel("Progreso: "), 5, 0)
-        sd_speed_label = QLabel("No enviando")
+        self.sd_speed_label = QLabel("No enviando")
         #sd_speed_label.setAlignment(Qt.AlignCenter)
-        leftside.addWidget(sd_speed_label, 5, 1)
+        leftside.addWidget(self.sd_speed_label, 5, 1)
         self.send_progressbar = QProgressBar()
         leftside.addWidget(self.send_progressbar, 6, 0, 1, 2)
 
@@ -179,9 +238,9 @@ class bGUI:
         rightside.addWidget(recv_label, 3, 0, 2, 2)
         # Third row
         rightside.addWidget(QLabel("Progreso: "), 5, 0)
-        rc_speed_label = QLabel("No enviando")
+        self.rc_speed_label = QLabel("No enviando")
         #rc_speed_label.setAlignment(Qt.AlignCenter)
-        rightside.addWidget(rc_speed_label, 5, 1)
+        rightside.addWidget(self.rc_speed_label, 5, 1)
         self.recv_progressbar = QProgressBar()
         rightside.addWidget(self.recv_progressbar, 6, 0, 1, 2)
 
@@ -200,10 +259,12 @@ class bGUI:
         # Server - receive file
         self._threadRc = Recv_File_Task()
         self._threadRc.progress.connect(lambda progress, le=self.recv_progressbar: self.__updateProgressBar(le, progress))
+        self._threadRc.speed.connect(lambda speed, le=self.rc_speed_label: self.__updateSpeed(le, speed))
 
         # Client - send file
         self._threadSd = Send_File_Task()
         self._threadSd.progress.connect(lambda progress, le=self.send_progressbar: self.__updateProgressBar(le, progress))
+        self._threadSd.speed.connect(lambda speed, le=self.sd_speed_label: self.__updateSpeed(le, speed))
 
         window.setMinimumWidth(650)
         window.setWindowTitle('bTransfer')
@@ -273,7 +334,10 @@ class bGUI:
             self.receiver = False
 
     def __updateProgressBar(self, bar, amount):
-        bar.setValue(amount)
+        bar.setValue(amount * 100)
+
+    def __updateSpeed(self, label, speed):
+        label.setText(speed)
 
     def __sendFile(self):
 
