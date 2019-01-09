@@ -37,8 +37,8 @@ class Recv_File_Task(QtCore.QThread):
     def run(self):
 
         self.s = socket.socket()
-        self.host = socket.gethostname()
-        self.s.bind((self.host, int(self.port)))
+        #self.host = socket.gethostname()
+        self.s.bind(('', int(self.port)))
         self.s.listen(1)
 
         stage = 0
@@ -46,24 +46,23 @@ class Recv_File_Task(QtCore.QThread):
 
         while True:
             c, addr = self.s.accept()
-            #print 'Got connection from', addr
-            #print "Receiving..."
             l = c.recv(1024)
             while (l):
-                #print "Receiving..."
                 if stage == 0:
-                    f = open("/home/btc/Escritorio/" + str(l), 'wb')
+                    filename = l.decode("utf-8").split(":")
+                    f = open("/home/btc/Escritorio/" + filename[1], 'wb')
                     stage += 1
                 elif stage == 1:
-                    self.size = int(l)
+                    chain = l.decode("utf-8").split(":")
+                    self.size = int(chain[-1])
+                    stage += 1
                 else:
                     f.write(l)
+                    acc += len(l)
+                    self.progress.emit(float(acc) / self.size)
                 l = c.recv(1024)
-                acc += len(l)
-                self.progress.emit(float(acc) / self.size)
+
             f.close()
-            #print "Done Receiving"
-            #c.send('Thank you for connecting')
             c.close()
 
 class Send_File_Task(QtCore.QThread):
@@ -85,25 +84,21 @@ class Send_File_Task(QtCore.QThread):
 
     def run(self):
 
-        self.s = socket.socket()
+        self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         #host = socket.gethostname()
-
         self.s.connect((self.ip, self.port))
-        self.s.send("Name " + file)
+        self.s.send(("Name:" + self.file.split("/")[-1]).encode('utf-8'))
+        self.s.send(("Size:" + str(self.size)).encode('utf-8'))
         f = open(self.file,'rb')
-        #print 'Sending...'
         l = f.read(1024)
         acc = 0
         while (l):
-            #print 'Sending...'
             self.s.send(l)
             acc += len(l)
             self.progress.emit(float(acc) / self.size)
             l = f.read(1024)
         f.close()
-        #print "Done Sending"
         self.s.shutdown(socket.SHUT_WR)
-        #print s.recv(1024)
         self.s.close()
 
 class bGUI:
