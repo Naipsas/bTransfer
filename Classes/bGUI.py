@@ -25,6 +25,8 @@ from PyQt5.QtWidgets import QPushButton, QLabel, QListWidget, QLineEdit, QProgre
 if __name__ == '__main__':
     print("Esta clase no es ejecutable")
 
+
+
 # https://stackoverflow.com/questions/12083034/pyqt-updating-gui-from-a-callback
 class Recv_File_Task(QtCore.QThread):
 
@@ -95,7 +97,7 @@ class Recv_File_Task(QtCore.QThread):
         line = data.decode("utf-8").split(":")
         if line[0] == "Name":
             self.filename = line[1]
-            self.f = open("/home/btc/Escritorio/" + self.filename, 'wb')
+            self.f = open(os.path.join(os.getcwd(), self.filename), 'wb')
             self.recvfile.emit(self.filename)
         elif line[0] == "Size":
             self.size = int(line[1])
