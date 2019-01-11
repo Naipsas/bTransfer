@@ -104,18 +104,19 @@ class Recv_File_Task(QtCore.QThread):
 
     def run(self):
 
-        self.s = socket.socket()
-        self.s.bind(('0.0.0.0', int(self.port)))
-        self.s.listen(1)
-
-        stage = 0
-        acc = 0
-
-        self.__setProgress(acc)
-
         while True:
+
+            self.s = socket.socket()
+            self.s.bind(('0.0.0.0', int(self.port)))
+            self.s.listen(1)
+
             self.c, addr = self.s.accept()
-            #l = c.recv(1024)
+
+            stage = 0
+            acc = 0
+
+            self.__setProgress(acc)
+
             l = self.__recvData()
             while (l):
                 start_time = time.time()
@@ -133,6 +134,8 @@ class Recv_File_Task(QtCore.QThread):
 
             self.f.close()
             self.c.close()
+            self.s.shutdown(socket.SHUT_WR)
+            self.s.close()
             stage = 0
             acc = 0
 
@@ -204,10 +207,8 @@ class Send_File_Task(QtCore.QThread):
     def run(self):
 
         #host = socket.gethostname()
-        try:
-            self.s.connect((self.ip, self.port))
-        except Exception as e:
-            self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.s.connect((self.ip, self.port))
 
         self.__sendHeader("Name", self.file.split("/")[-1])
         self.__sendHeader("Size", str(self.size))
