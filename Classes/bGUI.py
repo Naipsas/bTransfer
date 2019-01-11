@@ -30,6 +30,9 @@ class Recv_File_Task(QtCore.QThread):
 
     progress = QtCore.pyqtSignal(float)
     speed = QtCore.pyqtSignal(str)
+    recvfile = QtCore.pyqtSignal(str)
+
+    speedacc = []
     size = 0
 
     port = 0
@@ -40,20 +43,36 @@ class Recv_File_Task(QtCore.QThread):
         self.port = port
 
     def __setProgress(self, amount):
-        self.progress.emit(float(amount) / self.size)
+        if self.size != 0:
+            self.progress.emit(float(amount) / self.size)
+        else:
+            self.progress.emit(0)
 
     def __setSpeed(self, data, time):
-        result = data / time
+        speed = data / time
+        avg = self.__calculateAvg(speed)
         units = "Bps"
         prefix = ""
-        if result > 1000:
-            result /= 1024
+        if avg > 1000:
+            avg /= 1024
             prefix = "K"
-        if result > 1000:
-            result /= 1024
+        if avg > 1000:
+            avg /= 1024
             prefix = "M"
-        speed = str(result) + prefix + units
-        self.speed.emit(speed)
+        avg = self.__truncate(avg)
+        avg = str(avg) + prefix + units
+        self.speed.emit(avg)
+
+    def __calculateAvg(self, speed):
+        if len(self.speedacc) > 5:
+            self.speedacc.remove(self.speedacc[0])
+
+        self.speedacc.append(speed)
+        avg = sum(self.speedacc) / len(self.speedacc)
+        return avg
+
+    def __truncate(self, number):
+        return '%.2f'%(number)
 
     def __recvData(self):
         lengthbuf = self.__recvall(4)
@@ -77,6 +96,7 @@ class Recv_File_Task(QtCore.QThread):
         if line[0] == "Name":
             self.filename = line[1]
             self.f = open("/home/btc/Escritorio/" + self.filename, 'wb')
+            self.recvfile.emit(self.filename)
         elif line[0] == "Size":
             self.size = int(line[1])
         else:
@@ -85,11 +105,13 @@ class Recv_File_Task(QtCore.QThread):
     def run(self):
 
         self.s = socket.socket()
-        self.s.bind(('', int(self.port)))
+        self.s.bind(('0.0.0.0', int(self.port)))
         self.s.listen(1)
 
         stage = 0
         acc = 0
+
+        self.__setProgress(acc)
 
         while True:
             self.c, addr = self.s.accept()
@@ -118,6 +140,8 @@ class Send_File_Task(QtCore.QThread):
 
     progress = QtCore.pyqtSignal(float)
     speed = QtCore.pyqtSignal(str)
+
+    speedacc = []
     size = 0
 
     port = 0
@@ -146,20 +170,36 @@ class Send_File_Task(QtCore.QThread):
         self.s.sendall(data)
 
     def __setProgress(self, amount):
-        self.progress.emit(float(amount) / self.size)
+        if self.size != 0:
+            self.progress.emit(float(amount) / self.size)
+        else:
+            self.progress.emit(0)
 
     def __setSpeed(self, data, time):
-        result = data / time
+        speed = data / time
+        avg = self.__calculateAvg(speed)
         units = "Bps"
         prefix = ""
-        if result > 1000:
-            result /= 1024
+        if avg > 1000:
+            avg /= 1024
             prefix = "K"
-        if result > 1000:
-            result /= 1024
+        if avg > 1000:
+            avg /= 1024
             prefix = "M"
-        speed = str(result) + prefix + units
-        self.speed.emit(speed)
+        avg = self.__truncate(avg)
+        avg = str(avg) + prefix + units
+        self.speed.emit(avg)
+
+    def __calculateAvg(self, speed):
+        if len(self.speedacc) > 49:
+            self.speedacc.remove(self.speedacc[0])
+
+        self.speedacc.append(speed)
+        avg = sum(self.speedacc) / len(self.speedacc)
+        return avg
+
+    def __truncate(self, number):
+        return '%.2f'%(number)
 
     def run(self):
 
@@ -174,6 +214,7 @@ class Send_File_Task(QtCore.QThread):
         f = open(self.file,'rb')
         l = f.read(1024)
         acc = 0
+        self.__setProgress(acc)
         while (l):
             start_time = time.time()
             #self.s.send(l)
@@ -260,12 +301,12 @@ class bGUI:
         #self.rc_port_lineedit.textChanged.connect(self.__portChanged)
         self.rc_port_lineedit.textChanged.connect(lambda text, le=self.rc_port_lineedit: self.__portChanged(le, text))
         rightside.addWidget(self.rc_port_lineedit, 2, 1, 1, 1)
-        recv_label = QLabel("No se está recibiendo nada")
-        recv_label.setAlignment(Qt.AlignCenter)
-        rightside.addWidget(recv_label, 3, 0, 2, 2)
+        self.recv_label = QLabel("No se está recibiendo nada")
+        self.recv_label.setAlignment(Qt.AlignCenter)
+        rightside.addWidget(self.recv_label, 3, 0, 2, 2)
         # Third row
         rightside.addWidget(QLabel("Progreso: "), 5, 0)
-        self.rc_speed_label = QLabel("No enviando")
+        self.rc_speed_label = QLabel("No recibiendo")
         #rc_speed_label.setAlignment(Qt.AlignCenter)
         rightside.addWidget(self.rc_speed_label, 5, 1)
         self.recv_progressbar = QProgressBar()
@@ -287,6 +328,7 @@ class bGUI:
         self._threadRc = Recv_File_Task()
         self._threadRc.progress.connect(lambda progress, le=self.recv_progressbar: self.__updateProgressBar(le, progress))
         self._threadRc.speed.connect(lambda speed, le=self.rc_speed_label: self.__updateSpeed(le, speed))
+        self._threadRc.recvfile.connect(self.__recvFileName)
 
         # Client - send file
         self._threadSd = Send_File_Task()
@@ -324,6 +366,9 @@ class bGUI:
         # Here we have no checks yet
         self.ip = text
 
+    def __recvFileName(self, name):
+        self.recv_label.setText("Recibiendo: " + name)
+
     def __portChanged(self, widget, text):
         try:
             if int(text) > 65356:
@@ -340,8 +385,6 @@ class bGUI:
             widget.setText("0")
 
     def __toggleReceiver(self):
-
-        print("puerto:" + self.port)
 
         if (self.receiver == False) and (self.port != ""):
             self.enable_button.setText("Desactivar")
