@@ -121,7 +121,7 @@ class Recv_File_Task(QtCore.QThread):
 
             l = self.__recvData()
             while (l):
-                start_time = time.time()
+                start_time = time.perf_counter()
                 if stage < 2:
                     self.__recvHeader(l)
                     stage += 1
@@ -130,7 +130,7 @@ class Recv_File_Task(QtCore.QThread):
                     acc += len(l)
                     self.__setProgress(acc)
                 #l = c.recv(1024)
-                elapsed_time = time.time() - start_time
+                elapsed_time = time.perf_counter() - start_time
                 self.__setSpeed(len(l), elapsed_time)
                 l = self.__recvData()
 
@@ -219,13 +219,12 @@ class Send_File_Task(QtCore.QThread):
         acc = 0
         self.__setProgress(acc)
         while (l):
-            start_time = time.time()
-            #self.s.send(l)
+            start_time = time.perf_counter()
             self.__sendData(l)
             acc += len(l)
             self.__setProgress(acc)
             l = f.read(1024)
-            elapsed_time = time.time() - start_time
+            elapsed_time = time.perf_counter() - start_time
             self.__setSpeed(len(l), elapsed_time)
         f.close()
         self.s.shutdown(socket.SHUT_WR)
